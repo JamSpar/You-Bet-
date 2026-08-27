@@ -564,6 +564,23 @@
     background:var(--panel);border:1px solid #7A736C;border-radius:999px;padding:5px 11px;margin-top:2px;
   }
 
+  /* ---- League Central ---- */
+  .fc-table{width:100%;border-collapse:collapse;margin-top:8px;}
+  .fc-table th{text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--parchment-dim);padding:4px 6px;border-bottom:1px solid var(--gold-dark);}
+  .fc-table td{padding:6px;font-size:13px;border-bottom:1px dashed rgba(255,255,255,0.08);}
+  .fc-team-cell{display:flex;align-items:center;gap:8px;}
+  .fc-unmatched{color:var(--parchment-dim);font-style:italic;}
+  .fc-matchup-card{display:flex;align-items:center;justify-content:space-between;padding:10px 12px;border:1px solid var(--gold-dark);border-radius:10px;margin-bottom:8px;background:rgba(255,255,255,0.03);}
+  .fc-matchup-team{display:flex;flex-direction:column;align-items:center;gap:2px;min-width:88px;}
+  .fc-matchup-score{font-size:20px;font-weight:700;color:var(--parchment);}
+  .fc-status-live{color:#e05656;font-weight:700;font-size:10px;text-transform:uppercase;letter-spacing:.06em;}
+  .fc-status-live::before{content:"● ";animation:fc-pulse 1.2s infinite;}
+  .fc-status-final{color:var(--parchment-dim);font-size:10px;text-transform:uppercase;letter-spacing:.06em;}
+  .fc-status-upcoming{color:var(--text-accent);font-size:10px;text-transform:uppercase;letter-spacing:.06em;}
+  @keyframes fc-pulse{0%,100%{opacity:1;}50%{opacity:.3;}}
+  .fc-import-box{margin-top:14px;padding-top:14px;border-top:1px dashed #7A736C;}
+  .fc-import-box textarea{width:100%;min-height:70px;font-family:monospace;font-size:11px;}
+
 </style>
 </head>
 <body>
@@ -1248,6 +1265,233 @@ function toast(msg){
   window.__toastT = setTimeout(()=>t.classList.remove('show'), 2200);
 }
  
+/* ============================= FANTASY / LEAGUE CENTRAL ============================= */
+const FANTASY_KEY = 'youbet-fantasy-v1';
+let FANTASY = { lastSynced:null, source:null, standings:[], matchups:[], teamMap:{} };
+let fantasyImportOpen = false;
+
+async function loadFantasy(){
+  try{
+    const r = await window.storage.get(FANTASY_KEY, true);
+    return r ? JSON.parse(r.value) : { lastSynced:null, source:null, standings:[], matchups:[], teamMap:{} };
+  }catch(e){
+    return { lastSynced:null, source:null, standings:[], matchups:[], teamMap:{} };
+  }
+}
+async function saveFantasy(obj){
+  await window.storage.set(FANTASY_KEY, JSON.stringify(obj), true);
+}
+async function refreshFantasy(){
+  FANTASY = await loadFantasy();
+}
+
+/* ---- Minimal CSV parser: header row + comma-separated, handles simple quoted fields ---- */
+function parseCSV(text){
+  const lines = text.trim().split(/\r?\n/).filter(l=>l.trim().length>0);
+  if(lines.length<2) return [];
+  const splitLine = (line)=>{
+    const out=[]; let cur=''; let inQ=false;
+    for(let i=0;i<line.length;i++){
+      const c=line[i];
+      if(c==='"'){ inQ=!inQ; continue; }
+      if(c===',' && !inQ){ out.push(cur.trim()); cur=''; continue; }
+      cur+=c;
+    }
+    out.push(cur.trim());
+    return out;
+  };
+  const headers = splitLine(lines[0]).map(h=>h.toLowerCase().replace(/[^a-z]/g,''));
+  return lines.slice(1).map(line=>{
+    const cells = splitLine(line);
+    const row = {};
+    headers.forEach((h,i)=> row[h] = cells[i] !== undefined ? cells[i] : '');
+    return row;
+  });
+}
+
+function matchMemberByTeam(teamName){
+  const key = (teamName||'').trim().toLowerCase();
+  if(FANTASY.teamMap && FANTASY.teamMap[key]){
+    const m = STATE.members.find(mm=>mm.id===FANTASY.teamMap[key]);
+    if(m) return m;
+  }
+  return STATE.members.find(m=> (m.teamName||'').trim().toLowerCase() === key) || null;
+}
+
+async function submitTeamLink(csvTeamName, memberId){
+  const key = (csvTeamName||'').trim().toLowerCase();
+  FANTASY.teamMap = FANTASY.teamMap || {};
+  if(memberId) FANTASY.teamMap[key] = memberId;
+  else delete FANTASY.teamMap[key];
+  await saveFantasy(FANTASY);
+  toast('Team linked.');
+  switchTab('league');
+}
+window.submitTeamLink = function(csvTeamName){
+  const sel = document.getElementById('fc-link-'+csvTeamName.replace(/[^a-z0-9]/gi,''));
+  submitTeamLink(csvTeamName, sel.value || null);
+};
+
+/* ---- Import flow ---- */
+window.toggleFantasyImport = function(){
+  // Shows/hides the CSV paste form within the League Central tab.
+  // This is not a mode switch between "fantasy view" and "app view" --
+  // League Central is one tab among the others; this just opens/closes
+  // its import panel so the form isn't always taking up space.
+  fantasyImportOpen = !fantasyImportOpen;
+  switchTab('league');
+};
+window.handleFantasyFile = function(inputId, textareaId){
+  const input = document.getElementById(inputId);
+  const file = input.files && input.files[0];
+  if(!file) return;
+  const reader = new FileReader();
+  reader.onload = (e)=>{ document.getElementById(textareaId).value = e.target.result; };
+  reader.readAsText(file);
+};
+window.submitFantasyImport = async function(){
+  const standingsText = document.getElementById('fc-standings-csv').value.trim();
+  const matchupsText = document.getElementById('fc-matchups-csv').value.trim();
+  if(!standingsText && !matchupsText) return toast('Paste or upload at least one CSV.');
+
+  let standings = FANTASY.standings || [];
+  let matchups = FANTASY.matchups || [];
+
+  if(standingsText){
+    const rows = parseCSV(standingsText);
+    standings = rows.filter(r=>r.team).map(r=>({
+      team: r.team,
+      wins: parseInt(r.wins||'0',10) || 0,
+      losses: parseInt(r.losses||'0',10) || 0,
+      ties: parseInt(r.ties||'0',10) || 0,
+      pf: parseFloat(r.pointsfor||'0') || 0,
+      pa: parseFloat(r.pointsagainst||'0') || 0
+    }));
+  }
+  if(matchupsText){
+    const rows = parseCSV(matchupsText);
+    matchups = rows.filter(r=>r.team).map(r=>({
+      week: r.week || '',
+      team: r.team,
+      opponent: r.opponent || '',
+      teamScore: parseFloat(r.teamscore||'0') || 0,
+      oppScore: parseFloat(r.oppscore||'0') || 0,
+      status: (r.status||'final').toLowerCase()
+    }));
+  }
+
+  FANTASY = { ...FANTASY, standings, matchups, source:'csv', lastSynced: new Date().toISOString() };
+  await saveFantasy(FANTASY);
+  fantasyImportOpen = false;
+  toast('League Central updated.');
+  switchTab('league');
+};
+
+function fmtSyncTime(iso){
+  if(!iso) return 'never';
+  const d = new Date(iso);
+  return d.toLocaleDateString(undefined,{month:'short',day:'numeric'}) + ' · ' + d.toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'});
+}
+
+function renderLeagueCentral(container){
+  const standings = [...(FANTASY.standings||[])].sort((a,b)=> (b.wins-a.wins) || (b.pf-a.pf));
+  const matchups = FANTASY.matchups || [];
+
+  container.appendChild(el(`
+    <div class="card">
+      <div class="section-title">🏆 League Central</div>
+      <p class="small muted" style="margin:-4px 0 8px;">Your fantasy standings and this week's matchups, synced from your league. Nothing here touches the Slush Fund.</p>
+      <div class="small muted" style="margin-bottom:10px;">Last synced: ${escapeHtml(fmtSyncTime(FANTASY.lastSynced))}</div>
+      <button class="ghost-btn" onclick="toggleFantasyImport()">${fantasyImportOpen ? 'Close import' : (FANTASY.lastSynced ? '🔄 Re-import / update scores' : '➕ Import your league')}</button>
+    </div>
+  `));
+
+  if(fantasyImportOpen){
+    container.appendChild(el(`
+      <div class="card">
+        <div class="section-title">Import CSV</div>
+        <div class="fc-import-box">
+          <label class="small" style="font-weight:700;">Standings CSV</label>
+          <p class="small muted" style="margin:2px 0 6px;">Header row: Team,Wins,Losses,Ties,PointsFor,PointsAgainst</p>
+          <input type="file" accept=".csv,text/csv" id="fc-standings-file" onchange="handleFantasyFile('fc-standings-file','fc-standings-csv')" />
+          <textarea id="fc-standings-csv" placeholder="Team,Wins,Losses,Ties,PointsFor,PointsAgainst
+Harry's Hogs,5,2,0,712.4,650.1"></textarea>
+        </div>
+        <div class="fc-import-box">
+          <label class="small" style="font-weight:700;">This Week's Matchups CSV</label>
+          <p class="small muted" style="margin:2px 0 6px;">Header row: Week,Team,Opponent,TeamScore,OppScore,Status (status: upcoming, live, or final)</p>
+          <input type="file" accept=".csv,text/csv" id="fc-matchups-file" onchange="handleFantasyFile('fc-matchups-file','fc-matchups-csv')" />
+          <textarea id="fc-matchups-csv" placeholder="Week,Team,Opponent,TeamScore,OppScore,Status
+8,Harry's Hogs,Dan's Dynasty,64.2,58.9,live"></textarea>
+        </div>
+        <button class="primary-btn" style="width:100%;margin-top:10px;" onclick="submitFantasyImport()">Save & sync</button>
+      </div>
+    `));
+  }
+
+  if(matchups.length>0){
+    container.appendChild(el(`<div class="section-title" style="margin-top:16px;">This Week</div>`));
+    const card = document.createElement('div');
+    card.className='card';
+    matchups.forEach(mu=>{
+      const member = matchMemberByTeam(mu.team);
+      const statusClass = mu.status==='live' ? 'fc-status-live' : mu.status==='upcoming' ? 'fc-status-upcoming' : 'fc-status-final';
+      const statusLabel = mu.status==='live' ? 'Live' : mu.status==='upcoming' ? 'Upcoming' : 'Final';
+      card.appendChild(el(`
+        <div class="fc-matchup-card">
+          <div class="fc-matchup-team">
+            <div class="small" style="font-weight:700;">${escapeHtml(member ? member.name : mu.team)}</div>
+            <div class="fc-matchup-score">${mu.teamScore}</div>
+          </div>
+          <div style="text-align:center;">
+            <div class="${statusClass}">${statusLabel}</div>
+            <div class="small muted">Wk ${escapeHtml(String(mu.week))}</div>
+          </div>
+          <div class="fc-matchup-team">
+            <div class="small" style="font-weight:700;">${escapeHtml(mu.opponent)}</div>
+            <div class="fc-matchup-score">${mu.oppScore}</div>
+          </div>
+        </div>
+      `));
+    });
+    container.appendChild(card);
+  }
+
+  const standingsCard = document.createElement('div');
+  standingsCard.className='card';
+  standingsCard.style.marginTop='14px';
+  standingsCard.appendChild(el(`<div class="section-title">Standings</div>`));
+  if(standings.length===0){
+    standingsCard.appendChild(el(`<div class="small muted">No standings yet — import your league above to get started.</div>`));
+  } else {
+    const table = document.createElement('table');
+    table.className='fc-table';
+    table.appendChild(el(`<tr><th>Team</th><th>W-L-T</th><th>PF</th><th>PA</th></tr>`));
+    standings.forEach(s=>{
+      const member = matchMemberByTeam(s.team);
+      const safeId = s.team.replace(/[^a-z0-9]/gi,'');
+      const teamCell = member
+        ? `<div class="fc-team-cell">${avatarImg(member,24)} ${escapeHtml(member.name)}</div>`
+        : `<div class="fc-team-cell fc-unmatched">${escapeHtml(s.team)}
+             <select id="fc-link-${safeId}" style="font-size:11px;" onchange="submitTeamLink('${s.team.replace(/'/g,"\\'")}')">
+               <option value="">Link to member…</option>
+               ${STATE.members.map(m=>`<option value="${m.id}">${escapeHtml(m.name)}</option>`).join('')}
+             </select>
+           </div>`;
+      table.appendChild(el(`
+        <tr>
+          <td>${teamCell}</td>
+          <td>${s.wins}-${s.losses}-${s.ties}</td>
+          <td>${s.pf.toFixed(1)}</td>
+          <td>${s.pa.toFixed(1)}</td>
+        </tr>
+      `));
+    });
+    standingsCard.appendChild(table);
+  }
+  container.appendChild(standingsCard);
+}
+
 /* ============================= BOOT ============================= */
 /* ---- Backup / restore (safety net independent of publish/link mechanics) ---- */
 async function exportBackup(){
@@ -1342,6 +1586,7 @@ async function boot(){
   if(STATE) await refreshStickers();
   if(STATE) await refreshChat();
   if(STATE) await refreshNotifs();
+  if(STATE) await refreshFantasy();
   BOOTED = true;
   render();
   startPolling();
@@ -3292,6 +3537,7 @@ async function switchTab(tab){
   if(tab==='chat') await refreshChat();
   if(tab==='treasury' || tab==='profile') await refreshAvatars();
   if(tab==='bets'){ await refreshStickers(); await refreshChat(); }
+  if(tab==='league') await refreshFantasy();
   render();
 }
 window.switchTab = switchTab;
@@ -3334,6 +3580,7 @@ function renderMainApp(){
         <button class="tab-btn ${TAB==='chat'?'active':''}" onclick="switchTab('chat')">Smack Chat</button>
         <button class="tab-btn ${TAB==='squares'?'active':''}" onclick="switchTab('squares')">Squares</button>
         <button class="tab-btn ${TAB==='h2h'?'active':''}" onclick="switchTab('h2h')">Head to Head</button>
+        <button class="tab-btn ${TAB==='league'?'active':''}" onclick="switchTab('league')">League Central</button>
       </div>
       <div class="fridge-frame">
         <div class="fridge-body">
@@ -3356,6 +3603,7 @@ function renderMainApp(){
   else if(TAB==='chat') renderChat(content);
   else if(TAB==='profile') renderProfile(content);
   else if(TAB==='hostconsole') renderHostConsole(content);
+  else if(TAB==='league') renderLeagueCentral(content);
 }
  
 /* ============================= SETUP SCREEN ============================= */
