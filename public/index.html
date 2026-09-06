@@ -743,6 +743,13 @@ function fmtSlush(cents, withLabel){
   const s = (neg?'-':'') + bens.toLocaleString() + '.' + String(rem).padStart(2,'0');
   return withLabel ? s + ' Slush Fund' : s;
 }
+function totalContributed(memberId){
+  // Sums every 'grant' ledger entry for this member: opening balance, approved
+  // buy-back-ins, and host manual adjustments. Everything else (stakes, payouts,
+  // buyouts, refunds, host bonus) is activity on top of that principal, not new
+  // money in -- this is what makes a % payout accurate after multiple buy-ins.
+  return (STATE.ledger||[]).filter(l=>l.type==='grant' && l.memberId===memberId).reduce((sum,l)=>sum+l.amount,0);
+}
 function serialFor(id){
   const clean = id.replace(/[^a-z0-9]/gi,'').toUpperCase();
   return 'PLAYER #' + clean.slice(0,3) + '-' + clean.slice(3,7) + '-' + clean.slice(7,10);
@@ -2688,10 +2695,10 @@ function renderNewProp(container){
       <div class="section-title">🎯 Prediction</div>
       <p class="small" style="margin:0 0 6px;font-weight:700;color:var(--text-accent);text-transform:uppercase;letter-spacing:.06em;font-size:11px;">How It Works</p>
       <ul class="small muted" style="margin:0 0 14px;padding-left:18px;line-height:1.6;">
-        <li><b style="color:var(--parchment);">Choose a side:</b> Yes/No or Over/Under — Slush Fund deducts automatically.</li>
-        <li>The pot splits between winners once it resolves.</li>
-        <li><b style="color:var(--parchment);">You got good action?</b> You make the rules, you set the Slush — if 3+ people predict, you earn a ${CREATOR_CUT_PCT}% Host Bonus.</li>
-        <li><b style="color:var(--parchment);">Did you change your mind?</b> If the pot goes sideways and you want your money back, you lose ${STATE.buyoutFeePct==null?10:STATE.buyoutFeePct}% of your prediction — it stays in the pot for the eventual winners.</li>
+        <li><b style="color:var(--parchment);">Got a prediction?</b> Give it a name, set the rules and the Slush cost — if 3+ people predict, you earn a ${CREATOR_CUT_PCT}% Host Bonus. The winners split what's left.</li>
+        <li><b style="color:var(--parchment);">See one you like?</b> Choose Yes/No or Over/Under — your Slush deducts automatically.</li>
+        <li><b style="color:var(--parchment);">Change your mind?</b> If the pot goes sideways, you can exit your position — but ${STATE.buyoutFeePct==null?10:STATE.buyoutFeePct}% stays in the pot for the winners.</li>
+        <li><b style="color:var(--parchment);">No tampering.</b> If a prediction is really about one person, leave them out so they can't influence their own outcome.</li>
       </ul>
       <div class="field"><label>Title</label><input id="np-title" placeholder='e.g. "QB Buster"' /></div>
       <div class="field"><label>Description (optional)</label><textarea id="np-desc" rows="2" placeholder='e.g. "Harry&#39;s QB throws for under 200 yards vs the Packers"'></textarea></div>
@@ -2810,6 +2817,36 @@ function renderBakery(container){
           }).join('')}
         </div>
       ` : ''}
+    </div>
+    <div class="card">
+      <div class="section-title">🧮 Resolve the Pot</div>
+      <p class="small muted" style="margin:-4px 0 8px;">Accounts for buy-ins so the number is right no matter how many times someone's topped up. Net Result is what's actually been won or lost — Resolve Amount is that times whatever share your league's agreed on.</p>
+      <div class="field">
+        <label>Resolve share (%)</label>
+        ${isHost()
+          ? `<div class="row"><input id="resolve-pct-input" type="number" min="0" max="100" step="1" value="${STATE.resolvePct==null?'':STATE.resolvePct}" placeholder="e.g. 25" /><button class="ghost-btn" onclick="saveResolvePct()">Save</button></div>`
+          : `<div class="small muted">${STATE.resolvePct==null ? 'Not set yet — ask your Host.' : STATE.resolvePct + '%'}</div>`
+        }
+      </div>
+      ${STATE.resolvePct==null ? '' : `
+      <table class="fc-table">
+        <tr><th>Member</th><th>Contributed</th><th>Current</th><th>Net Result</th><th>Resolve Amount</th></tr>
+        ${sorted.map(m=>{
+          const contributed = totalContributed(m.id);
+          const net = m.bread - contributed;
+          const resolveAmt = net>0 ? Math.round(net * (STATE.resolvePct/100)) : 0;
+          return `
+            <tr>
+              <td>${escapeHtml(m.name)}</td>
+              <td>${fmtSlush(contributed)}</td>
+              <td>${fmtSlush(m.bread)}</td>
+              <td style="color:${net>=0?'var(--garage-green)':'var(--oxblood)'};font-weight:700;">${net>=0?'+':''}${fmtSlush(net)}</td>
+              <td>${net>0 ? fmtSlush(resolveAmt) : '—'}</td>
+            </tr>
+          `;
+        }).join('')}
+      </table>
+      `}
     </div>
   `));
 }
@@ -3051,6 +3088,16 @@ window.saveRecoveryCode = async function(){
   await saveState(STATE);
   toast(v ? 'Recovery code updated.' : 'Recovery code cleared — next person to use it sets a new one.');
   switchTab('hostconsole');
+};
+window.saveResolvePct = async function(){
+  const raw = document.getElementById('resolve-pct-input').value;
+  const v = raw==='' ? null : parseInt(raw,10);
+  if(v!=null && (isNaN(v) || v<0 || v>100)) return toast('Enter 0–100.');
+  await refreshState();
+  STATE.resolvePct = v;
+  await saveState(STATE);
+  toast(v==null ? 'Resolve share cleared.' : `Resolve share set to ${v}%.`);
+  switchTab('treasury');
 };
 window.saveTosText = async function(bumpVersion){
   const v = document.getElementById('tos-edit-textarea').value;
