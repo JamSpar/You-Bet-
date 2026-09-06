@@ -27,7 +27,7 @@
     --gold-text:#F2F6FF;
     --text-accent:#C1793D;
     --parchment:#E4E6EA;
-    --parchment-dim:#8B92A0;
+    --parchment-dim:#A9B0BE;
     --oxblood:#A83232;
     --oxblood-dim:#C98F82;
     --garage-green:#3C8C5C;
@@ -59,7 +59,7 @@
   }
   [data-theme="eighties"]{
     --ink:#1A2F5C;
-    --ink-2:#22396E;
+    --ink-2:#DCE6F5;
     --panel:#FFFFFF;
     --panel-2:#EEF2F8;
     --gold:#B22234;
@@ -68,9 +68,9 @@
     --gold-text:#FFFFFF;
     --text-accent:#1A2F5C;
     --parchment:#14213D;
-    --parchment-dim:#526080;
+    --parchment-dim:#4A5A7C;
     --oxblood:#2A4A8C;
-    --oxblood-dim:#C7D6EE;
+    --oxblood-dim:#5C71A0;
     --note:#FFFFFF;
     --radius:6px;
     --display-font:'Oswald',sans-serif;
@@ -113,9 +113,10 @@
   #app, .center-screen, .topbar, .tabs{position:relative;z-index:1;}
   html[data-theme="eighties"] .brand-text .league-name{color:#FFFFFF;}
   html[data-theme="eighties"] .brand-text .season{color:#C7D6EE;}
-  html[data-theme="eighties"] input, html[data-theme="eighties"] select, html[data-theme="eighties"] textarea{color:#FFFFFF;}
-  html[data-theme="eighties"] input::placeholder, html[data-theme="eighties"] textarea::placeholder{color:#9FB2D6;}
+  html[data-theme="eighties"] input::placeholder, html[data-theme="eighties"] textarea::placeholder{color:#7C8CAE;}
   html[data-theme="eighties"] .card{border-left:4px solid var(--gold);}
+  html[data-theme="eighties"] .tab-btn:not(.active){color:#D6E3F5;}
+  html[data-theme="eighties"] .tab-btn:not(.active):hover{background:rgba(255,255,255,.14);color:#FFFFFF;}
   h1,h2,h3,.display{
     font-family:var(--display-font);
     font-weight:700;
@@ -287,7 +288,7 @@
     padding:5px 14px;border-radius:6px;font-weight:700;font-size:11px;
     text-transform:uppercase;letter-spacing:.08em;
     box-shadow:0 3px 6px rgba(0,0,0,.4);
-    margin-bottom:12px;transform:rotate(-1deg);
+    margin-bottom:12px;
   }
   .magnet-sign.closed{background:var(--panel-2);color:var(--parchment-dim);}
   .small{font-size:12.5px;}
@@ -1907,6 +1908,8 @@ async function buyOutMarket(marketId){
   const refund = totalStake - fee;
   person.bread += refund;
   market.forfeitedBonus = (market.forfeitedBonus||0) + fee;
+  market.forfeitures = market.forfeitures || [];
+  if(fee>0) market.forfeitures.push({ userId: MY_ID, amount: fee });
   market.wagers = market.wagers.filter(w=>w.userId!==MY_ID);
   addLedger('buyout', MY_ID, refund, soleBettor ? `Exited pick on "${market.title}" (no penalty — nobody else took the action)` : `Exited pick on "${market.title}" (${fee>0?fmtSlush(fee,true)+' stays in the pot':'no penalty'})`);
   await saveState(STATE);
@@ -1934,11 +1937,17 @@ async function resolvePoolMarket(marketId, winningSide){
       p.bread += w.amount;
       addLedger('refund', w.userId, w.amount, `Refunded (no winners): "${market.title}"`);
     });
+    (market.forfeitures||[]).forEach(f=>{
+      const p = memberById(f.userId);
+      if(p){
+        p.bread += f.amount;
+        addLedger('refund', f.userId, f.amount, `Refunded exit fee (market recalled — no winners): "${market.title}"`);
+      }
+    });
     market.state='void';
     market.outcome=null;
     market.resolvedAt = nowISO();
     market.voidReason = 'No stakes on the winning side — recalled and refunded.';
-    STATE.bakeryReserve += (market.forfeitedBonus||0);
     await saveState(STATE);
     toast('Nobody backed the winner — recalled and refunded.');
     return;
@@ -1990,10 +1999,16 @@ async function voidPoolMarket(marketId){
     p.bread += w.amount;
     addLedger('refund', w.userId, w.amount, `Refunded (recalled): "${market.title}"`);
   });
+  (market.forfeitures||[]).forEach(f=>{
+    const p = memberById(f.userId);
+    if(p){
+      p.bread += f.amount;
+      addLedger('refund', f.userId, f.amount, `Refunded exit fee (recalled): "${market.title}"`);
+    }
+  });
   market.state='void';
   market.resolvedAt = nowISO();
   market.voidReason = 'Recalled by the Host.';
-  STATE.bakeryReserve += (market.forfeitedBonus||0);
   await saveState(STATE);
   toast('Contract recalled — Slush Fund refunded.');
 }
@@ -2610,7 +2625,7 @@ function renderGaragePanels(container){
   container.appendChild(el(`
     <div class="side-panel-row">
       <div class="card side-panel">
-        <div class="section-title">🔧 Tonight in the Garage</div>
+        <div class="section-title">📋 Tonight's Lineup</div>
         ${next ? `<div class="small" style="margin-bottom:10px;">⏰ <b>${escapeHtml(next.title)}</b><br/><span class="muted">Locks ${fmtDate(next.lockAt)}</span></div>` : `<div class="small muted" style="margin-bottom:10px;">Nothing on the clock right now.</div>`}
         <div class="small muted" style="text-transform:uppercase;letter-spacing:.06em;font-size:10px;margin-bottom:6px;">🏆 Hot Streak</div>
         ${streak.length===0 ? `<div class="small muted">No results yet this season.</div>` :
@@ -2658,19 +2673,19 @@ window.switchBetsView = function(view){
 function renderNewProp(container){
   container.appendChild(el(`
     <div class="card">
-      <div class="section-title">🎯 The Action- Split Pot Dynamic Predictions!</div>
-      <p class="small muted" style="margin:-4px 0 8px;">Split Pot Dynamic Predictions means your potential payout changes as other players join in. Get 3 or more people predicting and you earn a ${CREATOR_CUT_PCT}% Host Bonus for starting it — you can predict on it too. More predictions change the Expected Value (EV) for everyone.</p>
-      <p class="small" style="margin:12px 0 6px;font-weight:700;color:var(--text-accent);text-transform:uppercase;letter-spacing:.06em;font-size:11px;">How It Works</p>
+      <div class="section-title">🎯 The Action</div>
+      <p class="small" style="margin:0 0 6px;font-weight:700;color:var(--text-accent);text-transform:uppercase;letter-spacing:.06em;font-size:11px;">How It Works</p>
       <ul class="small muted" style="margin:0 0 14px;padding-left:18px;line-height:1.6;">
-        <li><b style="color:var(--parchment);">The Host Bonus:</b> You get ${CREATOR_CUT_PCT}% of the pool for starting the prediction — but only once 3 or more people have taken action on it.</li>
-        <li><b style="color:var(--parchment);">Your Own Prediction:</b> You can put your own Slush Fund into the option you like best.</li>
-        <li><b style="color:var(--parchment);">The Pot Changes:</b> Every new prediction shifts the balance of the pot.</li>
+        <li><b style="color:var(--parchment);">Choose a side:</b> Yes/No or Over/Under — Slush Fund deducts automatically.</li>
+        <li>The pot splits between winners once it resolves.</li>
+        <li><b style="color:var(--parchment);">You got good action?</b> You make the rules, you set the Slush — if 3+ people predict, you earn a ${CREATOR_CUT_PCT}% Host Bonus.</li>
+        <li><b style="color:var(--parchment);">Did you change your mind?</b> If the pot goes sideways and you want your money back, you lose ${STATE.buyoutFeePct==null?10:STATE.buyoutFeePct}% of your prediction — it stays in the pot for the eventual winners.</li>
       </ul>
-      <div class="field"><label>Title</label><input id="np-title" placeholder='e.g. "Bob's team goes over 7.5 trades"' /></div>
-      <div class="field"><label>Description (optional)</label><textarea id="np-desc" rows="2" placeholder="Rules, source of truth, anything to clarify"></textarea></div>
-      <div class="field"><label>Prediction amount (Slush Fund) — every prediction on this is fixed at this amount, set by you</label><input id="np-default-amt" type="number" min="0.01" step="0.01" value="0.50" /></div>
+      <div class="field"><label>Title</label><input id="np-title" placeholder='e.g. "QB Buster"' /></div>
+      <div class="field"><label>Description (optional)</label><textarea id="np-desc" rows="2" placeholder='e.g. "Harry&#39;s QB throws for under 200 yards vs the Packers"'></textarea></div>
+      <div class="field"><label>Slush Fund cost — every prediction on this is fixed at this amount, set by you</label><input id="np-default-amt" type="number" min="0.01" step="0.01" value="0.50" /></div>
       <div class="field">
-        <label>Type</label>
+        <label>Prediction type</label>
         <select id="np-type">
           <option value="yesno">Yes / No</option>
           <option value="overunder">Over / Under a line</option>
@@ -2683,57 +2698,23 @@ function renderNewProp(container){
         </div>
       </div>
       <div class="field">
-        <label>Who is this about? (excluded from trading — leave blank for a league-wide contract)</label>
+        <label>Leave someone out (optional)</label>
+        <p class="small muted" style="margin:-2px 0 8px;">They won't be able to predict on this one. Leave everyone unchecked for a league-wide contract.</p>
         <div class="checkbox-list" id="np-subjects">
           ${STATE.members.map(m=>`
             <label class="checkbox-item"><input type="checkbox" value="${m.id}" /> ${escapeHtml(m.name)} <span class="muted small">— ${escapeHtml(m.teamName)}</span></label>
           `).join('')}
         </div>
       </div>
-      <div class="field"><label>Lock trading at (optional)</label><input id="np-lock" type="datetime-local" /></div>
-      <div class="field">
-        <label class="checkbox-item" style="cursor:pointer;"><input type="checkbox" id="np-live" onchange="document.getElementById('np-live-fields').style.display=this.checked?'block':'none'; document.getElementById('np-model-wrap').style.display=(this.checked && document.getElementById('np-type').value==='overunder')?'block':'none';" /> 🔴 Live Market — odds move continuously, buy/sell anytime</label>
-      </div>
-      <div id="np-live-fields" style="display:none;">
-        <div id="np-model-wrap" style="display:none;">
-          <div class="field">
-            <label class="checkbox-item" style="cursor:pointer;"><input type="checkbox" id="np-model" onchange="document.getElementById('np-model-fields').style.display=this.checked?'block':'none';" /> 📈 Model-driven odds (recenter from stat updates)</label>
-          </div>
-          <div id="np-model-fields" style="display:none;">
-            <div class="row">
-              <div class="field"><label>Progress total</label><input id="np-model-total" type="number" placeholder="e.g. 60 (minutes) or 17 (weeks)" /></div>
-              <div class="field"><label>Progress label</label><input id="np-model-label" placeholder="minutes played" /></div>
-            </div>
-            <div class="field"><label>Volatility (optional — how sharply odds react; default ~35% of your line)</label><input id="np-model-vol" type="number" step="any" placeholder="auto" /></div>
-          </div>
-        </div>
-      </div>
-      <div class="field">
-        <label>Action limit (optional — cap seats to create scarcity)</label>
-        <div class="row" style="margin-bottom:8px;">
-          <button type="button" class="ghost-btn" onclick="setActionLimitPreset(0.5)">Half the league</button>
-          <button type="button" class="ghost-btn" onclick="setActionLimitPreset(0.667)">Two-thirds</button>
-          <button type="button" class="ghost-btn" onclick="setActionLimitPreset(1)">Everyone</button>
-        </div>
-        <input id="np-limit" type="number" min="1" step="1" placeholder="No limit — leave blank for open action" />
-        <div class="small muted" style="margin-top:4px;" id="np-limit-hint">${STATE.members.length} members in the league.</div>
-      </div>
+      <div class="field"><label>Predict by (optional)</label><input id="np-lock" type="datetime-local" /></div>
       <button class="primary-btn" onclick="submitNewProp()">Predict!</button>
     </div>
   `));
   const typeSel = document.getElementById('np-type');
   typeSel.addEventListener('change', ()=>{
     document.getElementById('np-ou-fields').style.display = typeSel.value==='overunder' ? 'block':'none';
-    const liveOn = document.getElementById('np-live').checked;
-    document.getElementById('np-model-wrap').style.display = (liveOn && typeSel.value==='overunder') ? 'block' : 'none';
   });
 }
-window.setActionLimitPreset = function(frac){
-  const eligible = STATE.members.length;
-  const n = Math.max(1, Math.round(eligible*frac));
-  document.getElementById('np-limit').value = n;
-  document.getElementById('np-limit-hint').textContent = `${n} of ${eligible} members can get a seat.`;
-};
 window.submitNewProp = async function(){
   const title = document.getElementById('np-title').value.trim();
   const desc = document.getElementById('np-desc').value.trim();
@@ -2741,32 +2722,24 @@ window.submitNewProp = async function(){
   const line = document.getElementById('np-line') ? document.getElementById('np-line').value : '';
   const unit = document.getElementById('np-unit') ? document.getElementById('np-unit').value.trim() : '';
   const lockVal = document.getElementById('np-lock').value;
-  const limitVal = document.getElementById('np-limit').value;
   const defaultAmount = parseFloat(document.getElementById('np-default-amt').value) || 0.5;
   const subjectIds = Array.from(document.querySelectorAll('#np-subjects input:checked')).map(i=>i.value);
   if(!title) return toast('Give it a title.');
-  if(defaultAmount<=0) return toast('Default prediction amount has to be more than zero.');
+  if(defaultAmount<=0) return toast('Slush Fund cost has to be more than zero.');
   if(type==='overunder' && (!line || !unit)) return toast('Over/Under needs a line and a unit.');
-  const actionLimit = limitVal ? Math.max(1, parseInt(limitVal,10)) : null;
-  const pricingMode = document.getElementById('np-live').checked ? 'live' : 'pot';
-  const modelEnabled = pricingMode==='live' && type==='overunder' && document.getElementById('np-model').checked;
-  if(modelEnabled){
-    const total = parseFloat(document.getElementById('np-model-total').value);
-    if(!total || total<=0) return toast('Give the model a progress total (e.g. 60 minutes, 17 weeks).');
-  }
   await createMarket({
     title, description:desc, type,
     line: type==='overunder' ? parseFloat(line) : null,
     unit: type==='overunder' ? unit : '',
     subjectIds,
     lockAt: lockVal ? new Date(lockVal).toISOString() : null,
-    actionLimit,
+    actionLimit: null,
     defaultAmount,
-    pricingMode,
-    modelEnabled,
-    modelProgressLabel: modelEnabled ? document.getElementById('np-model-label').value.trim() || 'progress' : null,
-    modelProgressTotal: modelEnabled ? parseFloat(document.getElementById('np-model-total').value) : null,
-    modelVolatility: modelEnabled ? (parseFloat(document.getElementById('np-model-vol').value) || null) : null
+    pricingMode: 'pot',
+    modelEnabled: false,
+    modelProgressLabel: null,
+    modelProgressTotal: null,
+    modelVolatility: null
   });
   toast("Locked in! 🎯");
   switchTab('bets');
