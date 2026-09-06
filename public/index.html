@@ -2673,7 +2673,7 @@ window.switchBetsView = function(view){
 function renderNewProp(container){
   container.appendChild(el(`
     <div class="card">
-      <div class="section-title">🎯 The Action</div>
+      <div class="section-title">🎯 Prediction</div>
       <p class="small" style="margin:0 0 6px;font-weight:700;color:var(--text-accent);text-transform:uppercase;letter-spacing:.06em;font-size:11px;">How It Works</p>
       <ul class="small muted" style="margin:0 0 14px;padding-left:18px;line-height:1.6;">
         <li><b style="color:var(--parchment);">Choose a side:</b> Yes/No or Over/Under — Slush Fund deducts automatically.</li>
@@ -3546,14 +3546,14 @@ function renderMainApp(){
         </div>
       </div>
       <div class="tabs even-tabs">
-        <button class="tab-btn ${TAB==='mint'?'active':''}" onclick="switchTab('mint')">The Action</button>
-        <button class="tab-btn ${TAB==='bets'?'active':''}" onclick="switchTab('bets')">Action Tracker</button>
-        <button class="tab-btn ${TAB==='treasury'?'active':''}" onclick="switchTab('treasury')">Win/Loss Record</button>
-        <button class="tab-btn ${TAB==='ledger'?'active':''}" onclick="switchTab('ledger')">History</button>
-        <button class="tab-btn ${TAB==='chat'?'active':''}" onclick="switchTab('chat')">Smack Chat</button>
-        <button class="tab-btn ${TAB==='squares'?'active':''}" onclick="switchTab('squares')">Squares</button>
+        <button class="tab-btn ${TAB==='mint'?'active':''}" onclick="switchTab('mint')">Prediction</button>
         <button class="tab-btn ${TAB==='h2h'?'active':''}" onclick="switchTab('h2h')">Head to Head</button>
+        <button class="tab-btn ${TAB==='squares'?'active':''}" onclick="switchTab('squares')">Squares</button>
+        <button class="tab-btn ${TAB==='bets'?'active':''}" onclick="switchTab('bets')">Action Tracker</button>
+        <button class="tab-btn ${TAB==='treasury'?'active':''}" onclick="switchTab('treasury')">Big Dog Tracker</button>
+        <button class="tab-btn ${TAB==='chat'?'active':''}" onclick="switchTab('chat')">Smack Chat</button>
         <button class="tab-btn ${TAB==='league'?'active':''}" onclick="switchTab('league')">League Central</button>
+        <button class="tab-btn ${TAB==='ledger'?'active':''}" onclick="switchTab('ledger')">What Happened?</button>
       </div>
       <div class="fridge-frame">
         <div class="fridge-body">
